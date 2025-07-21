@@ -21,7 +21,7 @@ execute:
 
 Today, we will walk through a few general principles of the potential outcomes framework and how assignment mechanisms shape our ability to learn from observed data. First, we will load in some required packages and set a seed for reproducibility:
 
-We will be working together on parts 1 through 4. You will work on part 5 on your own, and we will discuss the solutions at the end of the seminar.
+We will be working together on parts 1 through 5. You will work on part 6 on your own, and we will discuss the solutions at the end of the seminar.
 
 ```{r setup_r,message=FALSE,warning=FALSE}
 
