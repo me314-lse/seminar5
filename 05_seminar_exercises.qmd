@@ -213,59 +213,10 @@ Let's now apply what we have learned to a real world experiment. We will estimat
 *Note: dagify doesn't handle long variable names well, so best to pick short abbreviations.*
 
 ```{r dag_real_world}
-
-D_dag <- dagify(
-    # Define relationships
-    inc ~ D + educ + exp + pr,
-    D ~ educ + exp + btp,
-
-    # Set variable positions for better visualization
-    coords = list(
-        x = c(
-            D = 1, inc = 3, educ = 1.5, exp = 2,
-            btp = 0, pr = 3
-        ),
-        y = c(
-            D = 2, inc = 2, educ = 3.5, exp = 3.5,
-            btp = 2, pr = 3.5
-        )
-    ),
-
-    # Define which variables are exposure and outcome
-    exposure = "D",
-    outcome = "inc"
-)
-
-# Create the plot
-ggdag(D_dag,
-    text_size = 3.5,
-    node_size = 18
-) +
-    geom_dag_edges(edge_color = "gray50") +
-    geom_dag_node() +
-    geom_dag_text() +
-    theme_dag()
+# Your code goes here
 
 ```
 
-
-::: {.callout-tip collapse="true"}
-## Answer
-Below is one example of what the DAG could look like: 
-
-- `D`: Job program participation (treatment)
-- `inc`: Income (outcome)
-- `educ`: Education level (confounder)
-- `exp`: Work experience (confounder)
-- `btp`: Seeing an advertisement for the program from a banner tow plane (btp) flying over the city
-- `pr`: How recently has the individual received a payrise (payrise-recency)? 
-
-The confounders are straightforward. Education and work experience should definitely affect income. Quite likely, more individuals with more education and experience also have the skills that allow them to learn about and participate in the job program. 
-
-Once we try to find variables that are not affected by any other variable in the DAG, it gets more exotic. We could argue that seeing an ad for the job program from a banner tow plane flying over the city is not affected by any other variable in the DAG, and that it might affect whether people participate in the job program. But even that might be wrong if those working in windowy offices have better chances of seeing the ad than warehouse workers and if one group has higher earnings than the other. Payrise recency is likely affected by experience, because employees might learn how to get more frequent pay raises over time.
-
-Often, it is extremely difficult to find variables that were not actively randomized and for which we cannot plausibly argue some causal relationship with other variables of interest in our model.
-:::
 
 Given that it would be unrealistic to assume that we can find all variables that affect both job training and income, it might be a better idea to simply randomize who participates in the job training program and who does not. This is what Richard Lalonde did in an experiment in the 1970s (you can find the paper [here](https://www.jstor.org/stable/1806062?seq=11)).
 
@@ -306,14 +257,6 @@ First, create a balance table that shows the means of the covariates for the tre
 ```
 
 
-:::{.callout-tip collapse="true"}
-## Answer
-Unfortunately, it seems like Lalonde got a bit unlucky with his randomization. In the control group, there is a significantly higher proportion of individuals with no high school degree. This isn't ideal but we can control for this observed confounder. However, if this observed imbalance isn't just bad luck but a sign that the random assignment was contaminated and actually no longer truly random, the potential outcomes would not be independent of treatment and our ATE estimates down the line would be biased.
-:::
-
-Now, estimate the ATE using both difference-in-means and linear regression. For the ols-estimator, use the `lm_robust` function from the `estimatr` package to obtain robust standard errors.
-
-
 ```{r estimate_ate_lalonde}
 # Your code goes here
 ```
@@ -333,11 +276,6 @@ Estimate the ATE using linear regression controlling for `nodegree`. Compare you
 ```
 
 
-:::{.callout-tip collapse="true"}
-## Answer
-Earlier, we saw that one of our covariates (`nodegree`) was imbalanced between the treatment and control groups. If this variable affects the outcome `re78`, it is a confounder and we should control for it to obtain an unbiased estimate of the ATE. 
-:::
-
 Now, building on the model controlling for `nodegree`, try to increase the precision of the ATE estimate by controlling for the right covariates. Which kinds of variables should you NOT control for to improve precision, and why? Pick one that you believe would improve precision the most. Estimate the ATE using linear regression controlling for these covariates. Compare your estimate to the one you obtained earlier using only the treatment indicator and `nodegree`. Does it change? If so, why?
 
 ```{r precision_analysis}
@@ -345,30 +283,8 @@ Now, building on the model controlling for `nodegree`, try to increase the preci
 ```
 
 
-::: {.callout-tip collapse="true"}
-## Answer
-You should not control for variables that are affected by the treatment. Such post-treatment variables will not improve precision but will introduce post-treatment bias. In the lalonde dataset, all variables apart from the outcome and the treatment indicator are pre-treatment variables, so we could technically control for all of them.
-
-Controlling for variables that affect the outcome but are not affected by the treatment improves precision by reducing the residual variance in the outcome variable. In essence, by removing some unrelated variance in the outcome variable, it becomes easier to detect the effect of the treatment.
-
-A priori, we would expect that controlling for `re75` (the pre-treatment income) would improve precision the most, as it is likely to be strongly correlated with the post-treatment income `re78`. However, the standard error of the estimate of the treatment effect does not change much once we add `re75` to the model. This is because, surprisingly, the correlation between `re75` and `re78` is relatively weak (only about $r = .15$). Still, we obtain slightly smaller standard errors and more narrow confidence intervals once we account for `re75`.
-:::
-
-
 Finally, it could be that our treatment effects are heterogeneous across different individuals. Maybe young people learn more from the job training program and then do better afterwards (in relative terms) than old people. How could we test this?
 
-::: {.callout-tip collapse="true"}
-## Answer
-We can test for heterogeneous treatment effects by adding an interaction term between the treatment indicator and a variable that we believe might affect the treatment effect. For example, we could add an interaction term between the treatment indicator and `age` to see if the treatment effect is different for younger and older individuals.
-```{r heterogeneous_effects}
-# Your code goes here
-```
-
-
-However, the interaction term `treat:re75` is not significant, the programm was not more or less effective the older the participant was.
-
-While most treatment effects are probably somewhat heterogeneous, be careful and skeptical when you read about heterogeneous treatment effects. If you have enough variables, you will always find some statistically significant heterogeneity, simply because running many hypothesis tests means that eventually, some type 1 errors will occur. So let your analysis be guided by theory, not the theory by the analysis.
-:::
 
 ## By the end of this seminar, you should be able to:
 
