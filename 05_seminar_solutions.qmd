@@ -1,0 +1,458 @@
+---
+title: "Seminar 5: Causal Inference 1"
+subtitle: "LSE ME314: Introduction to Data Science and Machine Learning"
+date-modified: "17 July 2025" 
+toc: true
+format: html
+execute:
+  echo: true
+  eval: true
+---
+
+## Plan for Today
+
+- Simulate and understand potential outcomes 
+
+- Create DAGs in R
+
+- Learn about selection bias and how it can be addressed
+
+- Analyze data from a real experiment and understand the role of covariates
+
+Today, we will walk through a few general principles of the potential outcomes framework and how assignment mechanisms shape our ability to learn from observed data. First, we will load in some required packages and set a seed for reproducibility:
+
+We will be working together on parts 1 through 5. You will work on part 6 on your own, and we will discuss the solutions at the end of the seminar.
+
+```{r setup_r,message=FALSE,warning=FALSE}
+
+# load packages
+package_check <- function(need = c()) {
+    have <- need %in% rownames(installed.packages()) # checks packages you have
+    if (any(!have)) install.packages(need[!have]) # install missing packages
+    invisible(lapply(need, library, character.only = T))
+}
+
+required_packages <- c(
+    "dplyr", # for data management
+    "estimatr", # for regression with robust standard errors
+    "modelsummary", # for prettier model output tables and balance tables
+    "ggplot2", # for plotting
+    "ggdag" # for plotting directed acyclic graphs,
+)
+
+package_check(required_packages)
+
+set.seed(12345)
+```
+
+
+## Introduction
+
+We are interested in studying the effect of some causal variable ($D$) on some outcome variable ($Y$). In the potential outcomes framework, we assume that each unit has two potential outcomes: $Y_{0}$ and $Y_{1}$. $Y_{0}$ is the outcome that would be observed if the unit did not receive the treatment, while $Y_{1}$ is the outcome that would be observed if the unit did receive the treatment. The individual treatment effect (ITE) for each unit is then defined as $Y_{1} - Y_{0}$. The average treatment effect (ATE) is defined as the average of the individual treatment effects across all units, or the difference between the two averages, $E[Y_{1}] - E[Y_{0}]$.
+
+## Part 1: Simulating Potential Outcomes
+
+We will start by generating a dataset with 1000 units, and generating our two potential outcomes. We will assume that the potential outcomes are a product of three things: $D$, a pre-treatment covariate $X$, and some random noise $U$. Recall, while we are able to observe both potential outcomes for each unit in this simulation, in practice we can only observe one realized potential outcome, corresponding to the treatment that was actually received. For now, we won't simulate any treatment assignment vector ($D$).
+
+Let's simulate some data. We will generate 1000 units and assume that the potential outcomes are a function of a pre-treatment covariate $X$ and some random noise $U$. We will set the treatment effect (TE) to be 1. Note that this is a constant treatment effect -- it is 1 for all units. The ATE/ATT/ATU will also all be 1.
+
+```{r generate_data}
+N <- 1000
+TE <- 1
+
+data <- tibble(
+    X = rnorm(N),
+    U = rnorm(N),
+    Y0 = TE * 0 + 1.5 * X + 1 * U, # multiply the treatment effect by 0
+    Y1 = TE * 1 + 1.5 * X + 1 * U # multiply the treatment effect by 1
+)
+```
+
+
+Note that we set the treatment effect as 1. Let's check whether this is true in our simulated data:
+
+```{r check_treatment_effect}
+mean(data$Y1 - data$Y0)
+```
+
+
+Let's make a density plot that shows both potential outcomes:
+
+```{r plot_potential_outcomes}
+ggplot(data = data, aes(x = Y0)) +
+    geom_density(aes(fill = "Y0"), alpha = 0.5) +
+    geom_density(aes(x = Y1, fill = "Y1"), alpha = 0.5) +
+    theme_minimal() +
+    labs(title = "Potential Outcomes", x = "Y", y = "Density")
+```
+
+
+There is little surprising in this plot -- basically, the distribution for $Y1$ is just the same distribution as $Y0$ but shifted to the right by 1 unit. Again, the reason the distributions are otherwise **exactly** the same is that we are studying a case with a constant treatment effect.
+
+## Part 2: Selection Bias and DAGs
+
+As we saw in lecture, a central concern we face is selection bias. Selection bias occurs when the potential outcomes $(Y_{0},Y_{1})$ are systematically different between the treatment and control groups. Let's simulate a treatment vector that is not randomized, but instead based on the value of $X$.
+
+We can write down this data generating process as a DAG. The `dagify()` function from the {ggdag} is of great help here. It allows us to specify the relationships between variables in a directed acyclic graph (DAG) as a set of formulas. The `ggdag()` function then visualizes the DAG.
+
+```{r theoretical_dag_selection}
+theory <- dagify(Y ~ D + X + U,
+    D ~ X,
+    coords = list(
+        x = c(Y = 4, D = 6, X = 5, U = 4),
+        y = c(Y = 2, D = 2, X = 3, U = 3)
+    )
+)
+
+ggdag(theory) +
+    theme_void() +
+    remove_axes()
+```
+
+
+Now, let's create two datasets, one in which treatment assignment is based on $X$ and one in which assignment is randomized. We use the same potential outcomes in both datasets but which observations are realized depends on the two different assignment mechanisms. 
+
+First, let's create a dataset `data_selection` in which $D$ is a function of $X$, meaning that there is selection bias.  We will set $P(D=1) = 0.7$ if $X > 0$ and $P(D=1) = 0.3$ if $X \leq 0$.
+
+```{r selection_bias_assignment}
+data_selection <- data %>%
+    mutate(
+        D = ifelse(X > 0, rbinom(N, 1, 0.7), rbinom(N, 1, 0.3)), # D as a function of X
+        Y = Y1 * D + Y0 * (1 - D)
+    )
+```
+
+
+Next, let's generate a second dataset `data_random` in which $D$ is randomized (using simple random assignment), meaning that there is no selection bias. We will use a Bernoulli trial to assign treatment with a probability of 0.5.
+
+```{r random_assignment}
+# randomize via Bernoulli trial (simple random assignment):
+data_random <- data %>%
+    mutate(
+        D = rbinom(N, 1, 0.5), # D is randomized
+        Y = Y1 * D + Y0 * (1 - D)
+    )
+```
+
+
+Now that we have both our realized $D$ and our observed $Y$, let's estimate the ATE in two ways, difference-in-means and linear regression, first focussing on the selection bias case.
+
+```{r estimate_ate_selection}
+# Difference-in-means
+mean(data_selection$Y[data_selection$D == 1]) - mean(data_selection$Y[data_selection$D == 0])
+
+# Regression:
+lm(Y ~ D, data_selection)
+
+# add inferential statistics:
+lm(Y ~ D, data_selection) |>
+    summary()
+
+# use tidy approach and add confidence intervals:
+lm(Y ~ D, data_selection) |>
+    broom::tidy(conf.int = TRUE, conf.level = 0.99)
+
+# use tidy approach and get more goodness-of-fit statistics:
+lm(Y ~ D, data_selection) |>
+    broom::glance() |>
+    t() |> # transpose, just to make it fit in the terminal
+    round(3)
+```
+
+
+Note two things. First, in terms of point estimation the two approaches are exactly equivalent (aside from rounding). Second, both estimates are quite far from the known ATE -- note that we haven't actually demonstrated any bias here because we haven't done this exercise over repeated samples, but with $N=1000$ the 'miss' is notable.
+
+Why is this happening? Well, we have **selection bias** -- potential outcomes are not balanced between treatment groups. We can actually see that, because we have simulated both potential outcomes:
+
+```{r po_imbalance}
+mean(data_selection$Y0[data_selection$D == 1]) - mean(data_selection$Y0[data_selection$D == 0])
+mean(data_selection$Y1[data_selection$D == 1]) - mean(data_selection$Y1[data_selection$D == 0])
+
+data_selection[data_selection$D == 1, ] %>%
+    ggplot(aes(x = Y0)) +
+    geom_density(aes(fill = "Y0_treated"), alpha = 0.5) +
+    geom_density(data = data_selection[data_selection$D == 0, ], aes(x = Y0, fill = "Y0_control"), alpha = 0.5) +
+    theme_minimal() +
+    labs(title = "Potential Outcomes", x = "Y0", y = "Density")
+
+```
+
+
+## Part 3: Randomization
+
+Let's now explore how randomization as an assignment mechanism might solve the selection bias problem. Recall that we created a second dataset `data_random` in which $D$ is randomized, meaning that all potential outcomes have the same probability of being realized, regardless of the value of $X$.
+
+As before, we now have our treatment $D$ and our realized outcome $Y$. Let's estimate the ATE:
+
+```{r estimate_ate_randomization}
+# Difference-in-means
+mean(data_random$Y[data_random$D == 1]) - mean(data_random$Y[data_random$D == 0])
+
+# Regression:
+lm(Y ~ D, data_random) |>
+    tidy(conf.int = TRUE, conf.level = 0.99)
+```
+
+
+Randomization of $D$ has "solved" the selection problem. Why? By randomizing $D$, we are no longer in our previous DAG, where $X$ simultaneously sets $Y$ and $D$, or, in potential outcomes terms, where our potential outcomes are not independent of treatment assignment. Let's see that in terms of potential outcomes.
+
+```{r po_balance}
+mean(data_random$Y0[data_random$D == 1]) - mean(data_random$Y0[data_random$D == 0])
+mean(data_random$Y1[data_random$D == 1]) - mean(data_random$Y1[data_random$D == 0])
+
+data_random[data_random$D == 1, ] %>%
+    ggplot(aes(x = Y0)) +
+    geom_density(aes(fill = "Y0_treated"), alpha = 0.5) +
+    geom_density(data = data_random[data_random$D == 0, ], aes(x = Y0, fill = "Y0_control"), alpha = 0.5) +
+    theme_minimal() +
+    labs(title = "Potential Outcomes", x = "Y0", y = "Density")
+
+```
+
+
+Let's now learn some effective ways to visualize experimental results. We will start with a plot that shows both the estimated means and 95\% confidence intervals for each group (treated and control), and underlays the actual data from our experiment:
+
+```{r experiment_viz}
+set.seed(123)
+data_random %>%
+    ggplot(aes(x = D, y = Y)) +
+    # add the points, but jitter on the x-axis -- please be *VERY* careful using jitter.
+    geom_point(position = position_jitter(width = 0.05), alpha = 0.05) +
+    stat_summary(geom = "point", fun = mean, aes(group = D), size = 1) +
+    stat_summary(geom = "errorbar", fun.data = mean_cl_normal, width = 0) +
+    theme_minimal() +
+    scale_x_continuous(breaks = c(0, 1), labels = c("Control", "Treated")) +
+    # add text for point estimates:
+    geom_text(aes(label = round(after_stat(y), 2)), stat = "summary", vjust = -1) +
+    labs(title = "Mean Values of Y and Treatment Condition", x = "Treatment Status", y = "Y")
+```
+
+
+## Part 4: Use Covariates to Avoid Selection Bias
+
+When we generated our selection bias setting, we made treatment an explicit function of $X$. We also made $Y$ a function of $X$. As such, we know that $X$ is a confounder in the relationship between $D$ and $Y$. 
+
+Let's control for $X$. We will use a new function, `estimatr::lm_robust`, as this is a convenient function for linear regression with robust standard errors.
+
+```{r controlling_selection}
+# covariate adjustment in the selection case:
+summary(lm_robust(Y ~ D, data_selection))
+summary(lm_robust(Y ~ D + X, data_selection))
+```
+
+
+Notice two things. First, in the selection case, controlling for $X$ is sufficient to identify the ATE. This is only true because of our very explicit data generating process: We know that $X$ is the only confounder in the relationship between $D$ and $Y$. Second, in the randomization case, controlling for $X$ is not necessary to identify the ATE, but we do make some efficiency gains (notice what happens to the standard error on the estimate of $D$).
+
+## Part 5: Use Covariates to Increase Precision when D is Randomized
+
+In the experimental setting, $X$ should be, by the balancing property, independent of potential outcomes $Y0$ and $Y1$. Yet, we might still want to include covariates, but for a different reason: to increase the precision of our estimate of the ATE.
+
+```{r controlling_random}
+# covariate adjustment in the randomization case:
+summary(lm_robust(Y ~ D, data_random))
+summary(lm_robust(Y ~ D + X, data_random))
+```
+
+
+Notice the change in the standard error of the estimate of $D$ when we control for $X$. This is because we reduce the residual variance in $Y$ by controlling for $X$. Note that only variables that have a causal effect on $Y$ but are not related to $D$ should be included in the model to increase precision. Variables that are affected by $Y$ should NOT be included as this would introduce post-treatment bias.
+
+# Part 6: Randomization in Practice - Reanalizing a Real Experiment
+
+Let's now apply what we have learned to a real world experiment. We will estimate the average treatment effect of participating in a job training program on income. Before looking at the real data, draw a DAG that visualizes the relationship between program participation, income, and four covariates. Think about one variable that only affects the treatment, one that only affects the dependent variable, and two confounders. There is no single correct answer, but you should be able to justify your choices and be clear about the assumptions you are making.
+
+*Note: dagify doesn't handle long variable names well, so best to pick short abbreviations.*
+```{r dag_real_world}
+
+D_dag <- dagify(
+    # Define relationships
+    inc ~ D + educ + exp + pr,
+    D ~ educ + exp + btp,
+
+    # Set variable positions for better visualization
+    coords = list(
+        x = c(
+            D = 1, inc = 3, educ = 1.5, exp = 2,
+            btp = 0, pr = 3
+        ),
+        y = c(
+            D = 2, inc = 2, educ = 3.5, exp = 3.5,
+            btp = 2, pr = 3.5
+        )
+    ),
+
+    # Define which variables are exposure and outcome
+    exposure = "D",
+    outcome = "inc"
+)
+
+# Create the plot
+ggdag(D_dag,
+    text_size = 3.5,
+    node_size = 18
+) +
+    geom_dag_edges(edge_color = "gray50") +
+    geom_dag_node() +
+    geom_dag_text() +
+    theme_dag()
+
+```
+
+
+::: {.callout-tip collapse="true"}
+## Answer
+Below is one example of what the DAG could look like: 
+
+- `D`: Job program participation (treatment)
+- `inc`: Income (outcome)
+- `educ`: Education level (confounder)
+- `exp`: Work experience (confounder)
+- `btp`: Seeing an advertisement for the program from a banner tow plane (btp) flying over the city
+- `pr`: How recently has the individual received a payrise (payrise-recency)? 
+
+The confounders are straightforward. Education and work experience should definitely affect income. Quite likely, more individuals with more education and experience also have the skills that allow them to learn about and participate in the job program. 
+
+Once we try to find variables that are not affected by any other variable in the DAG, it gets more exotic. We could argue that seeing an ad for the job program from a banner tow plane flying over the city is not affected by any other variable in the DAG, and that it might affect whether people participate in the job program. But even that might be wrong if those working in windowy offices have better chances of seeing the ad than warehouse workers and if one group has higher earnings than the other. Payrise recency is likely affected by experience, because employees might learn how to get more frequent pay raises over time.
+
+Often, it is extremely difficult to find variables that were not actively randomized and for which we cannot plausibly argue some causal relationship with other variables of interest in our model.
+:::
+
+Given that it would be unrealistic to assume that we can find all variables that affect both job training and income, it might be a better idea to simply randomize who participates in the job training program and who does not. This is what Richard Lalonde did in an experiment in the 1970s (you can find the paper [here](https://www.jstor.org/stable/1806062?seq=11)).
+
+Lalonde's dataset contains some pre-treatment variables, a treatment indicator, and post-treatment real earnings. Import the dataset, call it `lalonde`, and inspect it:
+
+```{r ll_import}
+lalonde <- read.csv("/Users/anton/Library/CloudStorage/OneDrive-LondonSchoolofEconomics/Teaching/2025/ME314_prep/labs/seminar5/data/lalonde.csv")
+
+head(lalonde)
+```
+
+
+The dataset contains the following variables:
+
+- `treat`: a binary variable indicating whether the individual received the treatment (1) or not (0)
+
+- `age`: age of the individual
+
+- `educ`: years of educ
+
+- `black`: a binary variable indicating whether the individual is black (1) or not (0)
+
+- `hispanic`: a binary variable indicating whether the individual is Hispanic (1) or not (0)
+
+- `married`: a binary variable indicating whether the individual is married (1) or not (0)
+
+- `nodegree`: a binary variable indicating whether the individual has no high school degree (1) or whether they have one (0).
+
+- `re75`: real inc in 1975 (before the treatment)
+
+- `re78`: real inc in 1978 (after the treatment)
+
+
+First, create a balance table that shows the means of the covariates for the treatment and control groups. You can use the `datasummary_balance` function from the `modelsummary` package to do this. Check the function documentation for details. What do you notice about the covariate balance? Is there an issue and if so, how could it be addressed?
+
+```{r balance_table}
+datasummary_balance(
+    ~treat,
+    data = select(lalonde, where(is.numeric), -re78), # select only numeric variables but not the outcome
+    stars = T
+)
+```
+
+
+:::{.callout-tip collapse="true"}
+## Answer
+Unfortunately, it seems like Lalonde got a bit unlucky with his randomization. In the control group, there is a significantly higher proportion of individuals with no high school degree. This isn't ideal but we can control for this observed confounder. However, if this observed imbalance isn't just bad luck but a sign that the random assignment was contaminated and actually no longer truly random, the potential outcomes would not be independent of treatment and our ATE estimates down the line would be biased.
+:::
+
+Now, estimate the ATE using both difference-in-means and linear regression. For the ols-estimator, use the `lm_robust` function from the `estimatr` package to obtain robust standard errors.
+
+
+```{r estimate_ate_lalonde}
+# Difference-in-means
+mean(lalonde$re78[lalonde$treat == 1]) - mean(lalonde$re78[lalonde$treat == 0])
+
+# Regression
+lm_robust(re78 ~ treat, data = lalonde)
+```
+
+
+Next, let's consider the role of covariates. Create a DAG that visualizes the relationship between the treatment, the outcome, and three of the covariates (education, age, and nodegree). Assume there was no violation of the randomization protocol and D was properly randomized.
+
+```{r lalonde_dag}
+lalonde_dag <- dagify(
+    re78 ~ treat + educ + age + nodegree,
+    coords = list(
+        x = c(re78 = 4, treat = 1, educ = 2, age = 4, nodegree = 3),
+        y = c(re78 = 1, treat = 1, educ = 3, age = 3, nodegree = 3)
+    ),
+    exposure = "treat",
+    outcome = "re78"
+)
+
+ggdag(lalonde_dag,
+    text_size = 3.5,
+    node_size = 18
+) +
+    geom_dag_edges(edge_color = "gray50") +
+    geom_dag_node() +
+    geom_dag_text() +
+    theme_dag()
+```
+
+
+Estimate the ATE using linear regression controlling for `nodegree`. Compare your estimate to the one you obtained earlier using difference-in-means. Does it change? If so, why?
+
+```{r lalonde_nodegree}
+lm_robust(re78 ~ treat + nodegree, data = lalonde) |> summary()
+lm_robust(re78 ~ treat, data = lalonde) |> summary()
+```
+
+
+:::{.callout-tip collapse="true"}
+## Answer
+Earlier, we saw that one of our covariates (`nodegree`) was imbalanced between the treatment and control groups. If this variable affects the outcome `re78`, it is a confounder and we should control for it to obtain an unbiased estimate of the ATE. 
+:::
+
+Now, building on the model controlling for `nodegree`, try to increase the precision of the ATE estimate by controlling for the right covariates. Which kinds of variables should you NOT control for to improve precision, and why? Pick one that you believe would improve precision the most. Estimate the ATE using linear regression controlling for these covariates. Compare your estimate to the one you obtained earlier using only the treatment indicator and `nodegree`. Does it change? If so, why?
+
+```{r precision_analysis}
+lm_robust(re78 ~ treat + nodegree + re75, data = lalonde) |> summary()
+```
+
+
+::: {.callout-tip collapse="true"}
+## Answer
+You should not control for variables that are affected by the treatment. Such post-treatment variables will not improve precision but will introduce post-treatment bias. In the lalonde dataset, all variables apart from the outcome and the treatment indicator are pre-treatment variables, so we could technically control for all of them.
+
+Controlling for variables that affect the outcome but are not affected by the treatment improves precision by reducing the residual variance in the outcome variable. In essence, by removing some unrelated variance in the outcome variable, it becomes easier to detect the effect of the treatment.
+
+A priori, we would expect that controlling for `re75` (the pre-treatment income) would improve precision the most, as it is likely to be strongly correlated with the post-treatment income `re78`. However, the standard error of the estimate of the treatment effect does not change much once we add `re75` to the model. This is because, surprisingly, the correlation between `re75` and `re78` is relatively weak (only about $r = .15$). Still, we obtain slightly smaller standard errors and more narrow confidence intervals once we account for `re75`.
+:::
+
+
+Finally, it could be that our treatment effects are heterogeneous across different individuals. Maybe young people learn more from the job training program and then do better afterwards (in relative terms) than old people. How could we test this?
+
+::: {.callout-tip collapse="true"}
+## Answer
+We can test for heterogeneous treatment effects by adding an interaction term between the treatment indicator and a variable that we believe might affect the treatment effect. For example, we could add an interaction term between the treatment indicator and `age` to see if the treatment effect is different for younger and older individuals.
+```{r heterogeneous_effects}
+lm_robust(re78 ~ treat * age + nodegree, lalonde) |> summary()
+```
+
+
+However, the interaction term `treat:re75` is not significant, the programm was not more or less effective the older the participant was.
+
+While most treatment effects are probably somewhat heterogeneous, be careful and skeptical when you read about heterogeneous treatment effects. If you have enough variables, you will always find some statistically significant heterogeneity, simply because running many hypothesis tests means that eventually, some type 1 errors will occur. So let your analysis be guided by theory, not the theory by the analysis.
+:::
+
+## By the end of this seminar, you should be able to:
+
+- calculate the average treatment effect (ATE) using difference-in-means and linear regression
+
+- generate covariate balance tables to assess the balance of covariates between treatment and control groups
+
+- create and interpret directed acyclic graphs (DAGs) to visualize causal relationships
+
+- understand the role of selection bias and how randomization can address it
+
+- make informed decisions about covariate adjustment in causal inference
