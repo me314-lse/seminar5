@@ -302,11 +302,7 @@ The dataset contains the following variables:
 First, create a balance table that shows the means of the covariates for the treatment and control groups. You can use the `datasummary_balance` function from the `modelsummary` package to do this. Check the function documentation for details. What do you notice about the covariate balance? Is there an issue and if so, how could it be addressed?
 
 ```{r balance_table}
-datasummary_balance(
-    ~treat,
-    data = select(lalonde, where(is.numeric), -re78), # select only numeric variables but not the outcome
-    stars = T
-)
+# Your code goes here
 ```
 
 
@@ -319,43 +315,21 @@ Now, estimate the ATE using both difference-in-means and linear regression. For 
 
 
 ```{r estimate_ate_lalonde}
-# Difference-in-means
-mean(lalonde$re78[lalonde$treat == 1]) - mean(lalonde$re78[lalonde$treat == 0])
-
-# Regression
-lm_robust(re78 ~ treat, data = lalonde)
+# Your code goes here
 ```
 
 
 Next, let's consider the role of covariates. Create a DAG that visualizes the relationship between the treatment, the outcome, and three of the covariates (education, age, and nodegree). Assume there was no violation of the randomization protocol and D was properly randomized.
 
 ```{r lalonde_dag}
-lalonde_dag <- dagify(
-    re78 ~ treat + educ + age + nodegree,
-    coords = list(
-        x = c(re78 = 4, treat = 1, educ = 2, age = 4, nodegree = 3),
-        y = c(re78 = 1, treat = 1, educ = 3, age = 3, nodegree = 3)
-    ),
-    exposure = "treat",
-    outcome = "re78"
-)
-
-ggdag(lalonde_dag,
-    text_size = 3.5,
-    node_size = 18
-) +
-    geom_dag_edges(edge_color = "gray50") +
-    geom_dag_node() +
-    geom_dag_text() +
-    theme_dag()
+# Your code goes here
 ```
 
 
 Estimate the ATE using linear regression controlling for `nodegree`. Compare your estimate to the one you obtained earlier using difference-in-means. Does it change? If so, why?
 
 ```{r lalonde_nodegree}
-lm_robust(re78 ~ treat + nodegree, data = lalonde) |> summary()
-lm_robust(re78 ~ treat, data = lalonde) |> summary()
+# Your code goes here
 ```
 
 
@@ -367,7 +341,7 @@ Earlier, we saw that one of our covariates (`nodegree`) was imbalanced between t
 Now, building on the model controlling for `nodegree`, try to increase the precision of the ATE estimate by controlling for the right covariates. Which kinds of variables should you NOT control for to improve precision, and why? Pick one that you believe would improve precision the most. Estimate the ATE using linear regression controlling for these covariates. Compare your estimate to the one you obtained earlier using only the treatment indicator and `nodegree`. Does it change? If so, why?
 
 ```{r precision_analysis}
-lm_robust(re78 ~ treat + nodegree + re75, data = lalonde) |> summary()
+# Your code goes here
 ```
 
 
@@ -387,7 +361,7 @@ Finally, it could be that our treatment effects are heterogeneous across differe
 ## Answer
 We can test for heterogeneous treatment effects by adding an interaction term between the treatment indicator and a variable that we believe might affect the treatment effect. For example, we could add an interaction term between the treatment indicator and `age` to see if the treatment effect is different for younger and older individuals.
 ```{r heterogeneous_effects}
-lm_robust(re78 ~ treat * age + nodegree, lalonde) |> summary()
+# Your code goes here
 ```
 
 
