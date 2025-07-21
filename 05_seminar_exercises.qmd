@@ -193,7 +193,7 @@ Let's control for $X$. We will use a new function, `estimatr::lm_robust`, as thi
 ```
 
 
-Notice two things. First, in the selection case, controlling for $X$ is sufficient to identify the ATE. This is only true because of our very explicit data generating process: We know that $X$ is the only confounder in the relationship between $D$ and $Y$. Second, in the randomization case, controlling for $X$ is not necessary to identify the ATE, but we do make some efficiency gains (notice what happens to the standard error on the estimate of $D$).
+In the selection case, controlling for $X$ is sufficient to identify the ATE. This is only true because of our very explicit data generating process: We know that $X$ is the only confounder in the relationship between $D$ and $Y$. 
 
 ## Part 5: Use Covariates to Increase Precision when D is Randomized
 
